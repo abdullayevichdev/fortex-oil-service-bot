@@ -1,0 +1,28 @@
+{
+  "name": "fortex-oil-service-bot",
+  "version": "1.0.0",
+  "description": "Fortex OIL Service Station Telegram Bot - JavaScript Version",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "dev": "nodemon bot.js"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "fortex",
+    "oil",
+    "service-station",
+    "car-maintenance"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.0.0",
+    "node-telegram-bot-api": "^0.64.0",
+    "sqlite3": "^5.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0"
+  }
+}
