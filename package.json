@@ -5,7 +5,8 @@
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js",
-    "dev": "nodemon bot.js"
+    "dev": "nodemon bot.js",
+    "postinstall": "npm rebuild sqlite3 --build-from-source"
   },
   "keywords": [
     "telegram",
@@ -18,11 +19,11 @@
   "author": "Your Name",
   "license": "MIT",
   "dependencies": {
-    "dotenv": "^16.0.0",
+    "dotenv": "^16.4.5",
     "node-telegram-bot-api": "^0.64.0",
-    "sqlite3": "^5.0.0"
+    "sqlite3": "^5.1.7"
   },
   "devDependencies": {
-    "nodemon": "^3.0.0"
+    "nodemon": "^3.1.0"
   }
 }
