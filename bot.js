@@ -42,9 +42,7 @@ bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
 
-  if (!isAuthorized(userId)) {
-    return bot.sendMessage(chatId, '⛔ Kirish taqiqlangan. Administrator bilan bog\'laning.');
-  }
+  // ADMIN TEKSHIRUVI O'CHIRILDI — hamma kira oladi
 
   const text = `
 👋 **Assalomu alaykum Fortex OIL kompaniyasining ishchisi Asrorbek!** 💪
@@ -61,6 +59,7 @@ Men sizga mijozlarni qayd etish va moy almashtirishni boshqarishda yordam berama
     reply_markup: MAIN_KEYBOARD
   });
 });
+
 /* ===================== Asosiy tugmalar ===================== */
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
@@ -68,7 +67,7 @@ bot.on('message', async (msg) => {
   const userId = msg.from.id;
 
   if (!text || text.startsWith('/')) return;
-  if (!isAuthorized(userId)) return;
+  // ADMIN TEKSHIRUVI O'CHIRILDI — hamma foydalana oladi
 
   const conv = getConv(chatId);
 
