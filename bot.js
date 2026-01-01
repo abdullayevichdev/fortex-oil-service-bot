@@ -1,12 +1,11 @@
 /**
- * 🛢️ Fortex OIL Service Bot - Final Professional Versiya
- * Statistika 100% ishlaydi!
+ * 🛢️ Fortex OIL Service Bot - Mukammal Versiya
+ * + Eslatma + Admin Panel + Nasiya Savdo
  */
 
 const TelegramBot = require('node-telegram-bot-api');
 const {
   BOT_TOKEN,
-  ADMIN_IDS,
   MAIN_KEYBOARD,
   CANCEL_KEYBOARD,
   STATES,
@@ -15,16 +14,30 @@ const {
 } = require('./config');
 const db = require('./database');
 const utils = require('./utils');
+const cron = require('node-cron');
 
 db.initDatabase();
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
 const conversations = new Map();
+const ADMIN_CODE = '1980';
+const reminders = new Map(); // eslatma uchun
 
-function isAuthorized(userId) {
-  return ADMIN_IDS.includes(userId);
-}
+// Admin Panel klaviaturasi
+const ADMIN_PANEL_KEYBOARD = {
+  resize_keyboard: true,
+  keyboard: [
+    ['💳 Nasiya Savdo qo‘shish'],
+    ['📋 Nasiya Savdochilar ro‘yhati'],
+    ['🔙 Asosiy menyuga qaytish']
+  ]
+};
+
+const NASIYA_KEYBOARD = {
+  resize_keyboard: true,
+  keyboard: [['❌ Bekor qilish']]
+};
 
 function getConv(chatId) {
   if (!conversations.has(chatId)) {
@@ -40,9 +53,6 @@ function clearConv(chatId) {
 /* ===================== /start ===================== */
 bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
-  const userId = msg.from.id;
-
-  // ADMIN TEKSHIRUVI O'CHIRILDI — hamma kira oladi
 
   const text = `
 👋 **Assalomu alaykum Fortex OIL kompaniyasining ishchisi Asrorbek!** 💪
@@ -64,17 +74,52 @@ Men sizga mijozlarni qayd etish va moy almashtirishni boshqarishda yordam berama
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text?.trim();
-  const userId = msg.from.id;
 
   if (!text || text.startsWith('/')) return;
-  // ADMIN TEKSHIRUVI O'CHIRILDI — hamma foydalana oladi
 
   const conv = getConv(chatId);
 
+  // Admin panelga kirish
+  if (conv.state === 'ADMIN_CODE') {
+    if (text === ADMIN_CODE) {
+      conv.state = STATES.NONE;
+      return bot.sendMessage(chatId, '🔐 **Admin Panelga xush kelibsiz!**', {
+        parse_mode: 'Markdown',
+        reply_markup: ADMIN_PANEL_KEYBOARD
+      });
+    } else {
+      return bot.sendMessage(chatId, '❌ Noto‘g‘ri kod. Qayta urinib ko‘ring.', {
+        reply_markup: CANCEL_KEYBOARD
+      });
+    }
+  }
+
+  // Admin panel tugmalari
+  if (text === '💳 Nasiya Savdo qo‘shish') {
+    conv.state = 'NASIYA_NAME';
+    conv.data = { type: 'nasiya' };
+    return bot.sendMessage(chatId, '📝 **Nasiya mijoz ismini kiriting:**', {
+      parse_mode: 'Markdown',
+      reply_markup: NASIYA_KEYBOARD
+    });
+  }
+
+  if (text === '📋 Nasiya Savdochilar ro‘yhati') {
+    return viewNasiyaList(chatId);
+  }
+
+  if (text === '🔙 Asosiy menyuga qaytish') {
+    conv.state = STATES.NONE;
+    return bot.sendMessage(chatId, '🔙 Asosiy menyuga qaytdingiz!', {
+      reply_markup: MAIN_KEYBOARD
+    });
+  }
+
+  // Oddiy tugmalar
   if (text === '➕ Mijoz qo‘shish') {
     conv.state = STATES.NAME;
-    conv.data = {};
-    return bot.sendMessage(chatId, '📝 **Mijozning to‘liq ismini kiriting:**\n(Masalan: Ali Valiyev)', {
+    conv.data = { type: 'normal' };
+    return bot.sendMessage(chatId, '📝 **Mijozning to‘liq ismini kiriting:**', {
       parse_mode: 'Markdown',
       reply_markup: CANCEL_KEYBOARD
     });
@@ -92,15 +137,24 @@ bot.on('message', async (msg) => {
     return sendHelp(chatId);
   }
 
+  if (text === '🔐 Admin Panel') {
+    conv.state = 'ADMIN_CODE';
+    return bot.sendMessage(chatId, '🔐 **Admin Panel kodi:**', {
+      reply_markup: CANCEL_KEYBOARD
+    });
+  }
+
   if (text === '❌ Bekor qilish') {
     clearConv(chatId);
-    return bot.sendMessage(chatId, '❌ Amal bekor qilindi.\n\n💪 Yana tayyormiz!', {
+    return bot.sendMessage(chatId, '❌ Bekor qilindi.', {
       reply_markup: MAIN_KEYBOARD
     });
   }
 
+  // Suhbat holatlari
   switch (conv.state) {
     case STATES.NAME:
+    case 'NASIYA_NAME':
       return handleName(chatId, text);
     case STATES.KM:
       return handleKm(chatId, text);
@@ -108,38 +162,22 @@ bot.on('message', async (msg) => {
       return handleCoverageInput(chatId, text);
     case STATES.OIL:
       return handleOilInput(chatId, text);
+    case 'NASIYA_DEBT':
+      return handleNasiyaDebt(chatId, text);
   }
 });
 
 /* ===================== Ism ===================== */
 async function handleName(chatId, text) {
   if (text.length < 3) {
-    return bot.sendMessage(chatId, '⚠️ Ism juda qisqa. Iltimos, to‘liq ism kiriting:');
+    return bot.sendMessage(chatId, '⚠️ Ism qisqa. To‘liq kiriting.');
   }
 
   const conv = getConv(chatId);
   conv.data.name = text.trim();
 
-  try {
-    const existing = await db.getCustomersByName(text);
-    if (existing.length > 0) {
-      const keyboard = existing.slice(0, 8).map(c => [{
-        text: `👤 ${c.name}`,
-        callback_data: `cust_${c.customer_id}`
-      }]);
-      keyboard.push([{ text: '➕ Yangi mijoz', callback_data: 'new_cust' }]);
-
-      await bot.sendMessage(chatId, `🔍 Topilgan mijozlar (${existing.length} ta):\nTanlang yoki yangi yarating:`, {
-        reply_markup: { inline_keyboard: keyboard }
-      });
-      return;
-    }
-  } catch (err) {
-    console.error('Ism qidirishda xato:', err);
-  }
-
   conv.state = STATES.KM;
-  await bot.sendMessage(chatId, '🚗 **Hozirgi kilometrni kiriting:**\n(Masalan: 45000 yoki 45k)', {
+  await bot.sendMessage(chatId, '🚗 **Hozirgi kilometrni kiriting:**', {
     parse_mode: 'Markdown',
     reply_markup: CANCEL_KEYBOARD
   });
@@ -149,7 +187,7 @@ async function handleName(chatId, text) {
 async function handleKm(chatId, text) {
   const km = utils.parseKmInput(text);
   if (!km || km <= 0) {
-    return bot.sendMessage(chatId, '⚠️ Noto‘g‘ri format. Misol: 50000, 45k, 120000');
+    return bot.sendMessage(chatId, '⚠️ Noto‘g‘ri km. Masalan: 50000');
   }
 
   const conv = getConv(chatId);
@@ -157,24 +195,23 @@ async function handleKm(chatId, text) {
   conv.state = STATES.COVERAGE;
 
   const keyboard = DEFAULT_COVERAGE_OPTIONS.map(v => [{ text: `${utils.formatNumber(v)} km`, callback_data: `cov_${v}` }]);
-  keyboard.push([{ text: '✏️ Boshqa qiymat', callback_data: 'cov_custom' }]);
+  keyboard.push([{ text: '✏️ Boshqa', callback_data: 'cov_custom' }]);
 
-  await bot.sendMessage(chatId, `✅ Hozirgi km: **${utils.formatNumber(km)} km**\n\n⛽ **Moy necha km ga yetadi?**`, {
+  await bot.sendMessage(chatId, `✅ Hozirgi km: **${utils.formatNumber(km)} km**\n\n⛽ **Qamrov necha km?**`, {
     parse_mode: 'Markdown',
     reply_markup: { inline_keyboard: keyboard }
   });
 }
 
-/* ===================== Qamrov (custom) ===================== */
+/* ===================== Qamrov ===================== */
 async function handleCoverageInput(chatId, text) {
   const km = utils.parseKmInput(text);
   if (!km || km < 1000 || km > 50000) {
-    return bot.sendMessage(chatId, '⚠️ 1000–50000 km orasida qiymat kiriting (masalan: 10000)');
+    return bot.sendMessage(chatId, '⚠️ 1000–50000 km orasida kiriting');
   }
   await handleCoverage(chatId, km);
 }
 
-/* ===================== Qamrov tanlash ===================== */
 async function handleCoverage(chatId, value) {
   const conv = getConv(chatId);
   conv.data.coverageKm = value;
@@ -183,13 +220,13 @@ async function handleCoverage(chatId, value) {
   const keyboard = COMMON_OIL_TYPES.slice(0, 8).map(oil => [{ text: oil, callback_data: `oil_${oil}` }]);
   keyboard.push([{ text: '✏️ Boshqa moy', callback_data: 'oil_custom' }]);
 
-  await bot.sendMessage(chatId, `✅ Qamrov: **${utils.formatNumber(value)} km**\n\n🛢️ **Qaysi moy ishlatildi?**`, {
+  await bot.sendMessage(chatId, `✅ Qamrov: **${utils.formatNumber(value)} km**\n\n🛢️ **Moy turi?**`, {
     parse_mode: 'Markdown',
     reply_markup: { inline_keyboard: keyboard }
   });
 }
 
-/* ===================== Moy (custom) ===================== */
+/* ===================== Moy ===================== */
 async function handleOilInput(chatId, text) {
   if (text.length < 3) {
     return bot.sendMessage(chatId, '⚠️ Moy turini to‘liq kiriting');
@@ -197,10 +234,17 @@ async function handleOilInput(chatId, text) {
   await handleOil(chatId, text.trim());
 }
 
-/* ===================== Moy tanlash ===================== */
 async function handleOil(chatId, oilType) {
   const conv = getConv(chatId);
   conv.data.oilType = oilType;
+
+  if (conv.data.type === 'nasiya') {
+    conv.state = 'NASIYA_DEBT';
+    return bot.sendMessage(chatId, '💳 **Qarz summasini kiriting (so‘mda):**', {
+      parse_mode: 'Markdown',
+      reply_markup: NASIYA_KEYBOARD
+    });
+  }
 
   const nextKm = utils.calculateNextService(conv.data.currentKm, conv.data.coverageKm);
 
@@ -228,6 +272,43 @@ async function handleOil(chatId, oilType) {
   });
 }
 
+/* ===================== Nasiya qarz ===================== */
+async function handleNasiyaDebt(chatId, text) {
+  const debt = parseInt(text.replace(/[^0-9]/g, ''));
+  if (isNaN(debt) || debt <= 0) {
+    return bot.sendMessage(chatId, '⚠️ To‘g‘ri summa kiriting (raqamlar)');
+  }
+
+  const conv = getConv(chatId);
+  conv.data.debt = debt;
+
+  const nextKm = utils.calculateNextService(conv.data.currentKm, conv.data.coverageKm);
+
+  const text = `
+📋 **Nasiya savdo xulosasi** 📋
+
+👤 **Mijoz:** ${conv.data.name}
+🚗 **Hozirgi km:** ${utils.formatNumber(conv.data.currentKm)} km
+🛢️ **Moy turi:** ${conv.data.oilType}
+⛽ **Qamrov:** ${utils.formatNumber(conv.data.coverageKm)} km
+📅 **Keyingi xizmat:** ${utils.formatNumber(nextKm)} km
+💳 **Qarz:** ${utils.formatNumber(debt)} so‘m
+
+✅ **Tasdiqlaysizmi?**
+  `;
+
+  const keyboard = [
+    [{ text: '✅ Ha, saqlash', callback_data: 'save_nasiya' }],
+    [{ text: '❌ Bekor qilish', callback_data: 'cancel_service' }]
+  ];
+
+  conv.state = STATES.CONFIRM;
+  await bot.sendMessage(chatId, text, {
+    parse_mode: 'Markdown',
+    reply_markup: { inline_keyboard: keyboard }
+  });
+}
+
 /* ===================== Saqlash ===================== */
 async function saveService(chatId) {
   const conv = getConv(chatId);
@@ -245,14 +326,13 @@ async function saveService(chatId) {
     const nextKm = utils.calculateNextService(conv.data.currentKm, conv.data.coverageKm);
 
     const successText = `
-🎉 **Xizmat muvaffaqiyatli saqlandi!** 🎉
+🎉 **Xizmat saqlandi!** 🎉
 
 👤 ${conv.data.name}
 🚗 ${utils.formatNumber(conv.data.currentKm)} km → ${utils.formatNumber(nextKm)} km
 🛢️ ${conv.data.oilType}
 
-💪 Ajoyib ish! Yana bir mijoz xursand bo‘ldi! 🌟
-${utils.getMotivationalPhrase()}
+💪 Ajoyib ish!
     `;
 
     clearConv(chatId);
@@ -260,9 +340,65 @@ ${utils.getMotivationalPhrase()}
       parse_mode: 'Markdown',
       reply_markup: MAIN_KEYBOARD
     });
+
+    // Eslatma saqlash
+    reminders.set(carId, {
+      chatId,
+      name: conv.data.name,
+      nextKm,
+      oilType: conv.data.oilType,
+      stopReminder: false
+    });
+
   } catch (err) {
-    console.error('Saqlashda xato:', err);
-    await bot.sendMessage(chatId, '⚠️ Saqlashda xato yuz berdi. Qayta urinib ko‘ring.');
+    console.error('Xato:', err);
+    await bot.sendMessage(chatId, '⚠️ Xato yuz berdi.');
+  }
+}
+
+async function saveNasiya(chatId) {
+  const conv = getConv(chatId);
+
+  try {
+    let customerId = conv.data.customerId;
+    if (!customerId) {
+      customerId = await db.addCustomer(conv.data.name);
+    }
+
+    const carId = await db.addCar(customerId);
+
+    await db.addNasiya(carId, conv.data.currentKm, conv.data.coverageKm, conv.data.oilType, conv.data.debt);
+
+    const nextKm = utils.calculateNextService(conv.data.currentKm, conv.data.coverageKm);
+
+    const successText = `
+🎉 **Nasiya saqlandi!** 🎉
+
+👤 ${conv.data.name}
+🚗 ${utils.formatNumber(conv.data.currentKm)} km → ${utils.formatNumber(nextKm)} km
+🛢️ ${conv.data.oilType}
+💳 **Qarz:** ${utils.formatNumber(conv.data.debt)} so‘m
+
+⏳ Ro‘yxatda turadi!
+    `;
+
+    clearConv(chatId);
+    await bot.sendMessage(chatId, successText, {
+      parse_mode: 'Markdown',
+      reply_markup: ADMIN_PANEL_KEYBOARD
+    });
+
+    reminders.set(carId, {
+      chatId,
+      name: conv.data.name,
+      nextKm,
+      oilType: conv.data.oilType,
+      stopReminder: false
+    });
+
+  } catch (err) {
+    console.error('Nasiya xato:', err);
+    await bot.sendMessage(chatId, '⚠️ Xato yuz berdi.');
   }
 }
 
@@ -299,7 +435,7 @@ bot.on('callback_query', async (query) => {
   if (data.startsWith('cov_')) {
     if (data === 'cov_custom') {
       conv.state = STATES.COVERAGE;
-      return bot.sendMessage(chatId, '✏️ Necha km ga yetadi? (masalan: 10000)');
+      return bot.sendMessage(chatId, '✏️ Necha km?');
     }
     const val = parseInt(data.split('_')[1]);
     return handleCoverage(chatId, val);
@@ -318,6 +454,10 @@ bot.on('callback_query', async (query) => {
     return saveService(chatId);
   }
 
+  if (data === 'save_nasiya') {
+    return saveNasiya(chatId);
+  }
+
   if (data === 'cancel_service') {
     clearConv(chatId);
     return bot.sendMessage(chatId, '❌ Bekor qilindi.', { reply_markup: MAIN_KEYBOARD });
@@ -326,24 +466,83 @@ bot.on('callback_query', async (query) => {
   if (data === 'refresh_stats') {
     return showStatistics(chatId);
   }
+
+  // Eslatma tugmalari
+  if (data === 'reminder_yes') {
+    for (const [carId, info] of reminders.entries()) {
+      if (info.chatId === chatId && !info.stopReminder) {
+        reminders.set(carId, { ...info, stopReminder: true });
+        break;
+      }
+    }
+    await bot.sendMessage(chatId, '✅ Rahmat! Tez orada kutamiz! 🚗');
+  }
+
+  if (data === 'reminder_no') {
+    await bot.sendMessage(chatId, '🙂 Yaxshi, keyingi haftada eslatamiz!');
+  }
+
+  // Nasiya to'landi
+  if (data.startsWith('nasiya_paid_')) {
+    const id = data.split('_')[2];
+    await db.deleteNasiya(id);
+    await bot.sendMessage(chatId, '✅ Qarz to‘landi va o‘chirildi!');
+    viewNasiyaList(chatId);
+  }
 });
+
+/* ===================== Nasiya ro'yhati ===================== */
+async function viewNasiyaList(chatId) {
+  try {
+    const list = await db.getAllNasiya();
+
+    if (list.length === 0) {
+      return bot.sendMessage(chatId, '📋 Nasiya yo‘q', {
+        reply_markup: ADMIN_PANEL_KEYBOARD
+      });
+    }
+
+    let text = `💳 **Nasiya ro‘yhati** (${list.length} ta)\n\n`;
+    const keyboard = [];
+
+    for (const n of list) {
+      const nextKm = n.current_km + n.coverage_km;
+      text += `👤 **${n.name}**\n`;
+      text += `🚗 ${utils.formatNumber(n.current_km)} → ${utils.formatNumber(nextKm)} km\n`;
+      text += `🛢️ ${n.oil_type}\n`;
+      text += `💳 ${utils.formatNumber(n.debt)} so‘m\n\n`;
+
+      keyboard.push([{
+        text: `✅ ${n.name} to‘ladi`,
+        callback_data: `nasiya_paid_${n.id}`
+      }]);
+    }
+
+    await bot.sendMessage(chatId, text, {
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: keyboard }
+    });
+  } catch (err) {
+    await bot.sendMessage(chatId, '⚠️ Xato');
+  }
+}
 
 /* ===================== Eski mijozlar ===================== */
 async function viewAllCustomers(chatId) {
   try {
     const customers = await db.getRecentCustomers(20);
     if (customers.length === 0) {
-      return bot.sendMessage(chatId, '📂 Hozircha mijoz yo‘q.\n\n➕ "Mijoz qo‘shish" tugmasini bosing!', {
+      return bot.sendMessage(chatId, '📂 Mijoz yo‘q', {
         reply_markup: MAIN_KEYBOARD
       });
     }
 
-    let text = `📂 **Jami mijozlar: ${customers.length} ta** 📂\n\n`;
+    let text = `📂 **Mijozlar** (${customers.length} ta)\n\n`;
     const keyboard = [];
 
     for (const c of customers) {
       const carCount = c.car_count || 0;
-      text += `👤 **${c.name}** 🚗 ${carCount} ta avtomobil\n\n`;
+      text += `👤 **${c.name}** 🚗 ${carCount} ta\n\n`;
       keyboard.push([{ text: `👤 ${c.name}`, callback_data: `cust_${c.customer_id}` }]);
     }
 
@@ -352,23 +551,22 @@ async function viewAllCustomers(chatId) {
       reply_markup: { inline_keyboard: keyboard }
     });
   } catch (err) {
-    console.error('Mijozlarni olishda xato:', err);
-    await bot.sendMessage(chatId, '⚠️ Mijozlarni yuklashda xato. Qayta urinib ko‘ring.');
+    await bot.sendMessage(chatId, '⚠️ Xato');
   }
 }
 
-/* ===================== Statistika (yaxshilandi!) ===================== */
+/* ===================== Statistika ===================== */
 async function showStatistics(chatId) {
   try {
     const stats = await db.getTodayStats();
 
     const text = `
-📊 **Bugungi natijalar** 📊
+📊 **Bugun**
 
-🚗 Xizmat ko‘rsatilgan: **${stats.totalServices}** ta
-🛢️ Eng ko‘p ishlatilgan moy: **${stats.mostUsedOil}**
+🚗 **Xizmat:** ${stats.totalServices} ta
+🛢️ **Eng ko‘p moy:** ${stats.mostUsedOil}
 
-💪 Ajoyib ish! Davom eting! 🔥
+💪 Davom eting!
     `;
 
     const keyboard = [[{ text: '🔄 Yangilash', callback_data: 'refresh_stats' }]];
@@ -378,8 +576,7 @@ async function showStatistics(chatId) {
       reply_markup: { inline_keyboard: keyboard }
     });
   } catch (err) {
-    console.error('Statistikada xato:', err);
-    await bot.sendMessage(chatId, '⚠️ Statistika yuklanmadi. Keyinroq urinib ko‘ring.');
+    await bot.sendMessage(chatId, '⚠️ Xato');
   }
 }
 
@@ -388,14 +585,50 @@ async function sendHelp(chatId) {
   const text = `
 ❓ **Yordam**
 
-➕ **Mijoz qo‘shish** — Yangi mijoz uchun moy xizmati qayd etish
-📂 **Eski mijozlar** — Oldingi mijozlarni ko‘rish va ularga xizmat qo‘shish
-📊 **Statistika** — Bugungi natijalarni ko‘rish
+➕ Mijoz qo‘shish
+📂 Eski mijozlar
+📊 Statistika
 
-🚗💨 Ishingizga omad! Fortex OIL jamoasi siz bilan!
+🔐 Admin Panel (kod 1980)
+
+Omad!
   `;
 
   await bot.sendMessage(chatId, text, { parse_mode: 'Markdown', reply_markup: MAIN_KEYBOARD });
 }
 
-console.log('🚀 Fortex OIL Bot ishga tushdi! Statistika to\'liq ishlaydi!');
+/* ===================== Haftalik eslatma ===================== */
+async function sendWeeklyReminders() {
+  const phrases = [
+    '⏰ {name}! Moy vaqti yaqinlashmoqda — {nextKm} km',
+    '🛢️ Salom {name}! {oilType} moyingiz {nextKm} km ga yetishi kerak',
+    '🚨 Eslatma {name}! Keyingi xizmat: {nextKm} km',
+    '👋 {name}, moy almashtirish vaqti keldi mi?'
+  ];
+
+  for (const [carId, info] of reminders.entries()) {
+    if (info.stopReminder) continue;
+
+    const phrase = phrases[Math.floor(Math.random() * phrases.length)]
+      .replace('{name}', info.name)
+      .replace('{nextKm}', utils.formatNumber(info.nextKm))
+      .replace('{oilType}', info.oilType);
+
+    const keyboard = [
+      [{ text: '✅ Ha, tez orada boraman', callback_data: 'reminder_yes' }],
+      [{ text: '❌ Yo‘q, hali', callback_data: 'reminder_no' }]
+    ];
+
+    try {
+      await bot.sendMessage(info.chatId, phrase, {
+        reply_markup: { inline_keyboard: keyboard }
+      });
+    } catch (err) {
+      reminders.delete(carId);
+    }
+  }
+}
+
+cron.schedule('0 10 * * 1,3,5', sendWeeklyReminders);
+
+console.log('🚀 Bot ishga tushdi! Barcha funksiyalar faol!');

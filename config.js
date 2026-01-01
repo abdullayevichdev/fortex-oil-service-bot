@@ -1,14 +1,13 @@
 /**
- * ⚙️ Fortex OIL Bot - Config (yangilangan)
+ * ⚙️ Fortex OIL Bot - Config
  */
 
 require('dotenv').config();
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
-const ADMIN_IDS = (process.env.ADMIN_ID || '').split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
 
 if (!BOT_TOKEN) {
-  console.error('❌ BOT_TOKEN .env faylda topilmadi! Iltimos, .env fayl yarating.');
+  console.error('❌ BOT_TOKEN yo‘q!');
   process.exit(1);
 }
 
@@ -31,7 +30,8 @@ const MAIN_KEYBOARD = {
   resize_keyboard: true,
   keyboard: [
     ['➕ Mijoz qo‘shish', '📂 Eski mijozlar'],
-    ['📊 Statistika', '❓ Yordam']
+    ['📊 Statistika', '❓ Yordam'],
+    ['🔐 Admin Panel']
   ]
 };
 
@@ -51,7 +51,6 @@ const STATES = {
 
 module.exports = {
   BOT_TOKEN,
-  ADMIN_IDS,
   DB_PATH,
   DEFAULT_COVERAGE_OPTIONS,
   COMMON_OIL_TYPES,

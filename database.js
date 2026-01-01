@@ -42,8 +42,21 @@ function initDatabase() {
         coverage_km INTEGER,
         next_service_km INTEGER,
         oil_type TEXT,
-        service_date TEXT,  -- Sana qo'lda qo'shiladi
+        service_date TEXT,
         notes TEXT
+      )
+    `);
+
+    // YANGI: Nasiya jadvali
+    db.run(`
+      CREATE TABLE IF NOT EXISTS nasiya (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        car_id TEXT,
+        current_km INTEGER,
+        coverage_km INTEGER,
+        oil_type TEXT,
+        debt INTEGER,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
       )
     `);
   });
@@ -136,11 +149,11 @@ async function addCar(customerId, model = "Noma'lum model", plate = null) {
   });
 }
 
-// ================= SERVICES ================= (MUHIM O'ZGARTIRISH!)
+// ================= SERVICES =================
 async function addService(carId, currentKm, coverageKm, oilType, notes = "") {
   const id = genId();
   const next = currentKm + coverageKm;
-  const today = new Date().toISOString().split('T')[0]; // BUGUNGI SANA: YYYY-MM-DD
+  const today = new Date().toISOString().split('T')[0];
   const db = getDb();
 
   return new Promise((res, rej) => {
@@ -154,6 +167,48 @@ async function addService(carId, currentKm, coverageKm, oilType, notes = "") {
         res(id);
       }
     );
+  });
+}
+
+// YANGI: Nasiya funksiyalari
+async function addNasiya(carId, currentKm, coverageKm, oilType, debt) {
+  const db = getDb();
+  return new Promise((res, rej) => {
+    db.run(
+      `INSERT INTO nasiya (car_id, current_km, coverage_km, oil_type, debt) VALUES (?, ?, ?, ?, ?)`,
+      [carId, currentKm, coverageKm, oilType, debt],
+      function (err) {
+        if (err) return rej(err);
+        res(this.lastID);
+      }
+    );
+  });
+}
+
+async function getAllNasiya() {
+  const db = getDb();
+  return new Promise((res, rej) => {
+    db.all(
+      `SELECT n.*, c.name FROM nasiya n 
+       LEFT JOIN cars car ON n.car_id = car.car_id 
+       LEFT JOIN customers c ON car.customer_id = c.customer_id 
+       ORDER BY n.created_at DESC`,
+      [],
+      (err, rows) => {
+        if (err) return rej(err);
+        res(rows || []);
+      }
+    );
+  });
+}
+
+async function deleteNasiya(id) {
+  const db = getDb();
+  return new Promise((res, rej) => {
+    db.run(`DELETE FROM nasiya WHERE id = ?`, [id], err => {
+      if (err) return rej(err);
+      res();
+    });
   });
 }
 
@@ -198,5 +253,8 @@ module.exports = {
   getRecentCustomers,
   addCar,
   addService,
-  getTodayStats
+  getTodayStats,
+  addNasiya,
+  getAllNasiya,
+  deleteNasiya
 };
